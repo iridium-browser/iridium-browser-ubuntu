@@ -60,6 +60,10 @@ endif
 GN_DEFINES += treat_warnings_as_errors=false
 FFMPEG_MT_GN_DEFINES += treat_warnings_as_errors=false
 
+# Don't fail on linker warnings
+GN_DEFINES += fatal_linker_warnings=false
+FFMPEG_MT_GN_DEFINES += fatal_linker_warnings=false
+
 # We are never using a sysroot-based toolchain; override the wrong
 # autodetection for arm.
 GN_DEFINES += use_sysroot=false
