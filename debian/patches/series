@@ -45,5 +45,6 @@ fix-compile-error.patch
 specify-gcc-standard.patch
 fix-wayland-build.patch
 fix-vaapi-build.patch
+fix-atk-check-for-popup.patch
 iridium-manpage.patch
 iridium-welcomepage.patch
