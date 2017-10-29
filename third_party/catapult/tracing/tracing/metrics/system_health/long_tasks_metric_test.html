@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<!--
+Copyright 2016 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/core/test_utils.html">
+<link rel="import" href="/tracing/extras/chrome/chrome_user_friendly_category_driver.html">
+<link rel="import" href="/tracing/metrics/system_health/long_tasks_metric.html">
+<link rel="import" href="/tracing/value/histogram_set.html">
+
+<script>
+'use strict';
+
+tr.b.unittest.testSuite(function() {
+  test('longTasksMetric', function() {
+    const model = tr.c.TestUtils.newModel(function(model) {
+      const proc = model.getOrCreateProcess(1);
+      const thread = proc.getOrCreateThread(2);
+      thread.name = 'CrRendererMain';
+      const longTask = tr.c.TestUtils.newSliceEx({
+        title: 'foo',
+        start: 0,
+        duration: 50,
+      });
+      thread.sliceGroup.pushSlice(longTask);
+
+      thread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
+        title: 'UpdateLayerTree',
+        start: 0,
+        duration: 1,
+        cpuStart: 0,
+        cpuDuration: 1,
+      }));
+
+      thread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
+        title: 'minorGC',
+        start: 1,
+        duration: 1,
+        cpuStart: 1,
+        cpuDuration: 1,
+      }));
+
+      thread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
+        title: 'Decode Image',
+        start: 2,
+        duration: 1,
+        cpuStart: 2,
+        cpuDuration: 1,
+      }));
+
+      thread.sliceGroup.pushSlice(tr.c.TestUtils.newSliceEx({
+        title: 'Layout',
+        start: 3,
+        duration: 1,
+        cpuStart: 3,
+        cpuDuration: 1,
+      }));
+
+      model.addUserFriendlyCategoryDriver(
+          tr.e.chrome.ChromeUserFriendlyCategoryDriver);
+    });
+    const histograms = new tr.v.HistogramSet();
+    tr.metrics.sh.longTasksMetric(histograms, model);
+    const longTaskHist = histograms.getHistogramNamed('long tasks');
+    assert.strictEqual(1, longTaskHist.numValues);
+    assert.strictEqual(1, longTaskHist.allBins[1].count);
+    assert.lengthOf(longTaskHist.allBins[1].diagnosticMaps, 1);
+    const events =
+      longTaskHist.allBins[1].diagnosticMaps[0].get('relatedEvents');
+    assert.instanceOf(events, tr.v.d.RelatedEventSet);
+    assert.strictEqual(tr.b.getOnlyElement(events).title,
+        'foo');
+    const breakdown = longTaskHist.diagnostics.get('category');
+    assert.instanceOf(breakdown, tr.v.d.RelatedHistogramBreakdown);
+    assert.lengthOf(breakdown, 4);
+
+    let hist = breakdown.get('layout');
+    assert.instanceOf(hist, tr.v.Histogram);
+    assert.strictEqual(histograms.getHistogramNamed(hist.name), hist);
+    assert.strictEqual(0, hist.name.indexOf(longTaskHist.name));
+    assert.strictEqual(1, hist.numValues);
+    assert.strictEqual(1, hist.allBins[1].count);
+
+    hist = breakdown.get('gc');
+    assert.instanceOf(hist, tr.v.Histogram);
+    assert.strictEqual(histograms.getHistogramNamed(hist.name), hist);
+    assert.strictEqual(0, hist.name.indexOf(longTaskHist.name));
+    assert.strictEqual(1, hist.numValues);
+    assert.strictEqual(1, hist.allBins[1].count);
+
+    hist = breakdown.get('composite');
+    assert.instanceOf(hist, tr.v.Histogram);
+    assert.strictEqual(histograms.getHistogramNamed(hist.name), hist);
+    assert.strictEqual(0, hist.name.indexOf(longTaskHist.name));
+    assert.strictEqual(1, hist.numValues);
+    assert.strictEqual(1, hist.allBins[1].count);
+
+    hist = breakdown.get('imageDecode');
+    assert.instanceOf(hist, tr.v.Histogram);
+    assert.strictEqual(histograms.getHistogramNamed(hist.name), hist);
+    assert.strictEqual(0, hist.name.indexOf(longTaskHist.name));
+    assert.strictEqual(1, hist.numValues);
+    assert.strictEqual(1, hist.allBins[1].count);
+  });
+});
+</script>

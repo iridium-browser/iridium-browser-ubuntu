@@ -1,0 +1,16 @@
+include_rules = [
+  "+content/public/common",
+  "+content/public/renderer",
+  "+third_party/re2",
+  # Allow inclusion of WebKit API files.
+  "+third_party/WebKit/public/platform",
+  "+third_party/WebKit/public/web",
+]
+
+specific_include_rules = {
+  # TODO(elawrence): remove this when the Form-Not-Secure feature is fully
+  # launched. https://crbug.com/677295
+  "password_autofill_agent\.cc" : [
+    "+components/security_state/core",
+  ],
+}

@@ -1,0 +1,8 @@
+{
+  "dependencies": [
+    "ui"
+  ],
+  "scripts": [
+    "TestRunner.js"
+  ]
+}

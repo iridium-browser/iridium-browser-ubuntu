@@ -1,0 +1,61 @@
+# Copyright 2017 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//cc/cc.gni")
+
+cc_component("paint") {
+  output_name = "cc_paint"
+  sources = [
+    "discardable_image_map.cc",
+    "discardable_image_map.h",
+    "display_item_list.cc",
+    "display_item_list.h",
+    "draw_image.cc",
+    "draw_image.h",
+    "image_id.h",
+    "paint_canvas.cc",
+    "paint_canvas.h",
+    "paint_export.h",
+    "paint_flags.cc",
+    "paint_flags.h",
+    "paint_image.cc",
+    "paint_image.h",
+    "paint_op_buffer.cc",
+    "paint_op_buffer.h",
+    "paint_op_reader.cc",
+    "paint_op_reader.h",
+    "paint_op_writer.cc",
+    "paint_op_writer.h",
+    "paint_record.cc",
+    "paint_record.h",
+    "paint_recorder.cc",
+    "paint_recorder.h",
+    "paint_shader.cc",
+    "paint_shader.h",
+    "record_paint_canvas.cc",
+    "record_paint_canvas.h",
+    "skia_paint_canvas.cc",
+    "skia_paint_canvas.h",
+    "solid_color_analyzer.cc",
+    "solid_color_analyzer.h",
+  ]
+
+  defines = [ "CC_PAINT_IMPLEMENTATION=1" ]
+
+  # cc/paint is intended to be a separate component from cc that can be
+  # included in Blink.  This component should never publicly include
+  # anything that Blink core wouldn't include (e.g. base).
+  public_deps = [
+    "//cc/base",
+    "//cc/debug",
+    "//skia",
+    "//ui/gfx:color_space",
+    "//ui/gfx:geometry_skia",
+    "//ui/gfx/geometry",
+  ]
+
+  deps = [
+    "//base",
+  ]
+}

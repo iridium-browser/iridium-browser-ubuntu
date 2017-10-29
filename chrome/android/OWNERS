@@ -1,0 +1,9 @@
+bauerb@chromium.org
+dtrainor@chromium.org
+mariakhomenko@chromium.org
+nyquist@chromium.org
+tedchoc@chromium.org
+yfriedman@chromium.org
+
+per-file java_sources.gni=*
+per-file *.gn*=agrieve@chromium.org

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<!--
+Copyright 2016 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/base/xhr.html">
+<link rel="import" href="/tracing/value/histogram_set.html">
+
+<script>
+'use strict';
+/* eslint-disable no-console */
+
+// TODO(benjhayden): Test after MergedTelemetryInfo.
+
+function findGrouping(key) {
+  if (tr.v.HistogramGrouping.BY_KEY.has(key)) {
+    return tr.v.HistogramGrouping.BY_KEY.get(key);
+  }
+  return new tr.v.HistogramGrouping(key,
+      tr.v.d.TelemetryInfo.makeStoryGroupingKeyLabelGetter(key));
+}
+
+function findMergeable(hist, candidates) {
+  for (const candidate of candidates) {
+    if (candidate.canAddHistogram(hist)) return candidate;
+  }
+  return undefined;
+}
+
+function mergeLeafHistograms(groupedHistograms, mergedHistograms) {
+  for (const [name, histograms] of groupedHistograms) {
+    if (histograms instanceof Map) {
+      mergeLeafHistograms(histograms, mergedHistograms);
+      continue;
+    }
+
+    if (histograms.length === 1) {
+      mergedHistograms.addHistogram(histograms[0]);
+      continue;
+    }
+
+    // Merge Histograms in this leaf array and return the merged Histograms to
+    // mergedHistograms.
+    // If it isn't possible to merge all Histograms in |histograms| together,
+    // then merge them into as few merged Histograms as possible.
+    const merged = [histograms.shift().clone()];
+    for (const hist of histograms) {
+      const candidate = findMergeable(hist, merged);
+      if (candidate !== undefined) {
+        candidate.addHistogram(hist);
+        continue;
+      }
+      merged.push(hist.clone());
+    }
+    for (const hist of merged) {
+      mergedHistograms.addHistogram(hist);
+    }
+  }
+}
+
+function stripInternalDiagnostics(mergedHistograms) {
+  for (const hist of mergedHistograms) {
+    hist.diagnostics.delete(tr.v.d.RESERVED_NAMES.MERGED_FROM);
+    hist.diagnostics.delete(tr.v.d.RESERVED_NAMES.MERGED_TO);
+    hist.diagnostics.delete(tr.v.d.RESERVED_NAMES.GROUPING_PATH);
+  }
+}
+
+if (tr.isHeadless) {
+  const histograms = new tr.v.HistogramSet();
+  histograms.importDicts(JSON.parse(tr.b.getSync('file://' + sys.argv[1])));
+  const groupingKeys = sys.argv.slice(2);
+  const groupings = groupingKeys.map(findGrouping);
+  const groupedHistograms = histograms.groupHistogramsRecursively(groupings);
+  const mergedHistograms = new tr.v.HistogramSet();
+  mergeLeafHistograms(groupedHistograms, mergedHistograms);
+  mergedHistograms.deduplicateDiagnostics();
+  mergedHistograms.mergeRelationships();
+  stripInternalDiagnostics(mergedHistograms);
+  console.log(JSON.stringify(mergedHistograms.asDicts()));
+}
+</script>

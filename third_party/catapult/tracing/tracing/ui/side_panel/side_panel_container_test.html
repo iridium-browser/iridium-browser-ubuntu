@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/core/test_utils.html">
+<link rel="import" href="/tracing/model/event_set.html">
+<link rel="import" href="/tracing/model/model.html">
+<link rel="import" href="/tracing/ui/side_panel/side_panel.html">
+<link rel="import" href="/tracing/ui/side_panel/side_panel_container.html">
+
+<script>
+'use strict';
+
+tr.b.unittest.testSuite(function() {
+  function FakeBrushingStateController() {
+    this.addAllEventsMatchingFilterToSelectionReturnValue = [];
+
+    this.viewport = undefined;
+    this.model = undefined;
+    this.selection = new tr.model.EventSet();
+    this.highlight = new tr.model.EventSet();
+  }
+
+  FakeBrushingStateController.prototype = {
+    addEventListener(name, cb) {
+    }
+  };
+
+  function createModel() {
+    const m = tr.c.TestUtils.newModelWithEvents([], {
+      shiftWorldToZero: false,
+      pruneContainers: false,
+      customizeModelCallback(m) {
+        const browserProcess = m.getOrCreateProcess(1);
+        const browserMain = browserProcess.getOrCreateThread(2);
+        browserMain.sliceGroup.beginSlice('cat', 'Task', 0);
+        browserMain.sliceGroup.endSlice(10);
+        browserMain.sliceGroup.beginSlice('cat', 'Task', 20);
+        browserMain.sliceGroup.endSlice(30);
+      }
+    });
+    return m;
+  }
+
+  test('instantiateCollapsed', function() {
+    const brushingStateController = new FakeBrushingStateController();
+    brushingStateController.model = createModel();
+
+    const container = document.createElement('tr-ui-side-panel-container');
+    container.brushingStateController = brushingStateController;
+    this.addHTMLOutput(container);
+  });
+});
+</script>

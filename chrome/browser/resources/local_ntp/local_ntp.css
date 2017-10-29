@@ -1,0 +1,290 @@
+/* Copyright 2015 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+/* TODO: Need to discuss with NTP folks before we remove font-family from the
+ * body tag. */
+body {
+  background-attachment: fixed !important;
+  cursor: default;
+  font-family: arial, sans-serif;
+  font-size: small;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+#ntp-contents {
+  text-align: -webkit-center;
+}
+
+.non-google-page #ntp-contents {
+  position: absolute;
+  top: calc(50% - 155px);
+  width: 100%;
+}
+
+body.hide-fakebox-logo #logo,
+body.hide-fakebox-logo #fakebox {
+  visibility: hidden;
+}
+
+#logo {
+  background-image: url(../../../../ui/webui/resources/images/iridium_text.svg);
+  background-repeat: no-repeat;
+  height: 92px;
+  margin-bottom: 24px;
+  margin-top: 157px;
+  width: 272px;
+}
+
+.non-google-page #logo {
+  display: none;
+}
+
+body.alternate-logo #logo {
+  -webkit-mask-image:
+      url(../../../../ui/webui/resources/images/iridium_text.svg);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 100%;
+  background: #eee;
+}
+
+#fakebox {
+  background-color: #fff;
+  border-radius: 2px;
+  box-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  cursor: text;
+  font-size: 18px;
+  height: 44px;
+  line-height: 36px;
+  max-width: 672px;
+  outline: none;
+  position: relative;
+  transition: box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* #fakebox width is set dynamically from JS. */
+  width: 300px;
+}
+
+.non-google-page #fakebox {
+  display: none;
+}
+
+#fakebox:hover,
+body.fakebox-focused #fakebox {
+  box-shadow: 0 3px 8px 0 rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+#fakebox > input {
+  bottom: 0;
+  box-sizing: border-box;
+  left: 0;
+  margin: 0;
+  opacity: 0;
+  padding-left: 8px;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+html[dir=rtl] #fakebox > input {
+  padding-left: 0;
+  padding-right: 8px;
+  right: 0;
+}
+
+#fakebox-text {
+  bottom: 4px;
+  color: rgba(0, 0, 0, 0.38);
+  font-family: arial, sans-serif;
+  font-size: 16px;
+  left: 13px;
+  margin-top: 1px;
+  overflow: hidden;
+  position: absolute;
+  right: 13px;
+  text-align: initial;
+  text-overflow: ellipsis;
+  top: 4px;
+  vertical-align: middle;
+  visibility: inherit;
+  white-space: nowrap;
+}
+
+html[dir=rtl] #fakebox-text {
+  left: auto;
+  right: 13px;
+}
+
+#cursor {
+  background: #333;
+  bottom: 12px;
+  left: 13px;
+  position: absolute;
+  top: 12px;
+  visibility: hidden;
+  width: 1px;
+}
+
+html[dir=rtl] #cursor {
+  left: auto;
+  right: 13px;
+}
+
+@keyframes blink {
+  0% {
+    opacity: 1;
+  }
+  61.55% {
+    opacity: 0;
+  }
+}
+
+body.fakebox-drag-focused #fakebox-text,
+body.fakebox-focused #fakebox-text {
+  visibility: hidden;
+}
+
+body.fakebox-drag-focused #cursor {
+  visibility: inherit;
+}
+
+body.fakebox-focused #cursor {
+  animation: blink 1.3s step-end infinite;
+  visibility: inherit;
+}
+
+#most-visited {
+  -webkit-user-select: none;
+  margin-top: 64px;
+  text-align: -webkit-center;
+}
+
+/* Non-Google pages have no Fakebox, so don't need top margin. */
+.non-google-page #most-visited {
+  margin-top: 0;
+}
+
+#mv-tiles {
+  /* Two rows of tiles of 128px each, 16px of spacing between the rows, and
+   * 4px/8px of margin on top and bottom respectively. If you change this, also
+   * change the corresponding values in most_visited_single.css. */
+  height: calc(2*128px + 16px + 4px + 8px);
+  margin: 0;
+  position: relative;
+  text-align: -webkit-auto;
+}
+
+#mv-notice-x {
+  -webkit-mask-image: -webkit-image-set(
+      url(chrome-search://local-ntp/images/close_3_mask.png) 1x,
+      url(chrome-search://local-ntp/images/close_3_mask.png@2x) 2x);
+  -webkit-mask-position: 3px 3px;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: 10px 10px;
+  background-color: rgba(90,90,90,0.7);
+  cursor: pointer;
+  display: inline-block;
+  height: 16px;
+  margin-left: 20px;
+  outline: none;
+  vertical-align: middle;
+  width: 16px;
+}
+
+html[dir=rtl] #mv-notice-x {
+  margin-left: 0;
+  margin-right: 20px;
+}
+
+#mv-notice-x:hover {
+  background-color: rgba(90,90,90,1.0);
+}
+
+#mv-notice-x:active {
+  background-color: rgb(66,133,244);
+}
+
+/* The notification shown when a tile is blacklisted. */
+#mv-notice {
+  font-size: 12px;
+  font-weight: bold;
+  opacity: 1;
+  padding: 10px 0;
+}
+
+#mv-notice span {
+  cursor: default;
+  display: inline-block;
+  height: 16px;
+  line-height: 16px;
+  vertical-align: top;
+}
+
+/* Links in the notification. */
+#mv-notice-links span {
+  -webkit-margin-start: 6px;
+  color: rgb(17, 85, 204);
+  cursor: pointer;
+  outline: none;
+  padding: 0 4px;
+}
+
+#mv-notice-links span:hover,
+#mv-notice-links span:focus {
+  text-decoration: underline;
+}
+
+.default-theme.dark #mv-msg {
+  color: #fff;
+}
+
+.default-theme.dark #mv-notice-links span {
+  color: #fff;
+}
+
+#mv-notice.mv-notice-delayed-hide {
+  opacity: 0;
+  transition-delay: 10s;
+  transition-property: opacity;
+}
+
+#mv-notice.mv-notice-hide {
+  display: none;
+}
+
+#attribution {
+  -webkit-user-select: none;
+  bottom: 0;
+  color: #fff;
+  cursor: default;
+  display: inline-block;
+  font-size: 13px;
+  left: auto;
+  position: fixed;
+  right: 8px;
+  text-align: left;
+  z-index: -1;
+}
+
+html[dir=rtl] #attribution,
+#attribution.left-align-attribution {
+  left: 8px;
+  right: auto;
+  text-align: right;
+}
+
+#mv-single {
+  border: none;
+  height: 100%;
+  width: 100%;
+}
+
+#one-google {
+  position: fixed;
+  transition: opacity 130ms;
+  z-index: 1;
+}
+
+#one-google.hidden {
+  opacity: 0;
+}

@@ -1,0 +1,48 @@
+<link rel="import" href="chrome://resources/html/polymer.html">
+
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
+
+<!-- Common css variables for Material Design WebUI. -->
+<style is="custom-style">
+  :root {
+    --cr-actionable: {
+      cursor: pointer;
+    };
+
+    --cr-button-edge-spacing: 12px;
+
+    /* Spacing between policy (controlledBy) indicator and control. */
+    --cr-controlled-by-spacing: 24px;
+
+    --cr-focused-item-color: var(--google-grey-300);
+
+    /* The inner icon is 20px in size. The button has 8px * 2 padding. */
+    --cr-icon-ripple-size: 36px;
+    --cr-icon-ripple-padding: 8px;
+
+    --cr-icon-size: 20px;
+
+    --cr-icon-height-width: {
+      height: var(--cr-icon-size);
+      width: var(--cr-icon-size);
+    }
+
+    --cr-icon-button-margin-start: 16px;
+
+    --cr-icon-ripple-margin: calc(var(--cr-icon-ripple-padding) * -1);
+
+    --cr-paper-icon-button-margin: {
+      /* Shift button so ripple overlaps the end of the row. */
+      -webkit-margin-end: var(--cr-icon-ripple-margin);
+      -webkit-margin-start: var(--cr-icon-button-margin-start);
+    }
+
+    --cr-selectable-focus: {
+      background-color: var(--cr-focused-item-color);
+      outline: none;
+    }
+    --cr-separator-height: 1px;
+    --cr-separator-line: var(--cr-separator-height) solid rgba(0, 0, 0, 0.06);
+    --paper-checkbox-ink-size: 40px;
+  }
+</style>

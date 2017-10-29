@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!--
+Copyright 2016 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/metrics/all_metrics.html">
+<link rel="import" href="/tracing/metrics/metric_registry.html">
+<link rel="import" href="/tracing/mre/function_handle.html">
+<link rel="import" href="/tracing/value/diagnostics/reserved_names.html">
+<link rel="import" href="/tracing/value/histogram_set.html">
+
+<script>
+'use strict';
+
+tr.exportTo('tr.metrics', function() {
+  /**
+   * @param {!tr.model.Model} model
+   * @param {!Object} options
+   * @param {!Array.<string>} options.metrics
+   * @return {!tr.v.HistogramSet}
+   */
+  function runMetrics(model, options) {
+    if (options === undefined) {
+      throw new Error('Options are required.');
+    }
+
+    const metricNames = options.metrics;
+    if (!metricNames) {
+      throw new Error('Metric names should be specified.');
+    }
+
+    const histograms = new tr.v.HistogramSet();
+
+    for (const metricName of metricNames) {
+      const metric = tr.metrics.MetricRegistry.findTypeInfoWithName(metricName);
+      if (metric === undefined) {
+        throw new Error('"' + metricName + '" is not a registered metric.');
+      }
+      metric.constructor(histograms, model, options);
+    }
+
+    validateDiagnosticNames(histograms);
+
+    return histograms;
+  }
+
+  /**
+   * Ensure that metrics don't use reserved diagnostic names.
+   *
+   * @param {!tr.v.HistogramSet} histograms
+   */
+  function validateDiagnosticNames(histograms) {
+    for (const hist of histograms) {
+      for (const name of hist.diagnostics.keys()) {
+        if (tr.v.d.RESERVED_NAMES_SET.has(name)) {
+          throw new Error(
+              `Illegal diagnostic name "${name}" on Histogram "${hist.name}"`);
+        }
+      }
+    }
+  }
+
+  /**
+   * @param {!tr.v.HistogramSet} histograms
+   * @param {!tr.model.Model} model
+   */
+  function addTelemetryInfo(histograms, model) {
+    const telemetry = new tr.v.d.TelemetryInfo();
+    for (const metadata of model.metadata) {
+      if (!metadata.value) continue;
+
+      if (metadata.value.telemetry) {
+        telemetry.addInfo(metadata.value.telemetry);
+
+        histograms.addSharedDiagnostic(
+            tr.v.d.RESERVED_NAMES.TRACE_START,
+            new tr.v.d.DateRange(metadata.value.telemetry.traceStartMs));
+      }
+    }
+    histograms.addSharedDiagnostic(tr.v.d.RESERVED_NAMES.TELEMETRY, telemetry);
+  }
+
+  /**
+   * @param {!tr.mre.MreResult} result
+   * @param {!tr.model.Model} model
+   * @param {!Object} options
+   * @param {!Array.<string>} options.metrics
+   */
+  function metricMapFunction(result, model, options) {
+    const histograms = runMetrics(model, options);
+    addTelemetryInfo(histograms, model);
+
+    result.addPair('histograms', histograms.asDicts());
+
+    const scalarDicts = [];
+    for (const value of histograms) {
+      for (const [statName, scalar] of value.statisticsScalars) {
+        scalarDicts.push({
+          name: value.name + '_' + statName,
+          numeric: scalar.asDict(),
+          description: value.description,
+        });
+      }
+    }
+    result.addPair('scalars', scalarDicts);
+  }
+
+  tr.mre.FunctionRegistry.register(metricMapFunction);
+
+  return {
+    metricMapFunction,
+    runMetrics,
+  };
+});
+</script>

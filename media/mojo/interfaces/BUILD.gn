@@ -1,0 +1,94 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//mojo/public/tools/bindings/mojom.gni")
+
+mojom("interfaces") {
+  sources = [
+    "audio_decoder.mojom",
+    "audio_output_stream.mojom",
+    "audio_parameters.mojom",
+    "content_decryption_module.mojom",
+    "decryptor.mojom",
+    "demuxer_stream.mojom",
+    "interface_factory.mojom",
+    "media_log.mojom",
+    "media_service.mojom",
+    "media_types.mojom",
+    "output_protection.mojom",
+    "provision_fetcher.mojom",
+    "renderer.mojom",
+    "video_decoder.mojom",
+    "video_encode_accelerator.mojom",
+  ]
+
+  if (is_android) {
+    sources += [ "media_drm_storage.mojom" ]
+  }
+
+  if (is_chromeos) {
+    sources += [ "platform_verification.mojom" ]
+  }
+
+  if (is_android) {
+    sources += [ "android_overlay.mojom" ]
+  }
+
+  public_deps = [
+    "//gpu/ipc/common:interfaces",
+    "//mojo/common:common_custom_types",
+    "//services/service_manager/public/interfaces",
+    "//ui/gfx/geometry/mojo",
+    "//url/mojo:url_mojom_gurl",
+    "//url/mojo:url_mojom_origin",
+  ]
+}
+
+mojom("constants") {
+  sources = [
+    "constants.mojom",
+  ]
+}
+
+mojom("remoting_common") {
+  sources = [
+    "remoting_common.mojom",
+  ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  use_new_js_bindings = false
+}
+
+mojom("mirror_service_remoting") {
+  sources = [
+    "mirror_service_remoting.mojom",
+  ]
+
+  public_deps = [
+    ":remoting_common",
+  ]
+
+  # TODO(crbug.com/699569): Convert to use the new JS bindings.
+  use_new_js_bindings = false
+}
+
+mojom("remoting") {
+  sources = [
+    "remoting.mojom",
+  ]
+
+  public_deps = [
+    ":remoting_common",
+  ]
+}
+
+mojom("test_interfaces") {
+  testonly = true
+  sources = [
+    "traits_test_service.mojom",
+  ]
+  public_deps = [
+    ":interfaces",
+  ]
+}

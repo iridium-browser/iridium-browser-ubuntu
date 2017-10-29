@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+<link rel="import" href="/tracing/base/utils.html">
+
+<script>
+'use strict';
+
+tr.b.unittest.testSuite(function() {
+  test('getUsingPath', function() {
+    const z = tr.b.getUsingPath('x.y.z', {'x': {'y': {'z': 3}}});
+    assert.strictEqual(z, 3);
+
+    const w = tr.b.getUsingPath('x.w', {'x': {'y': {'z': 3}}});
+    assert.isUndefined(w);
+  });
+
+  test('testExceptionNaming', function() {
+    const err = new Error('asdf');
+    err.name = 'MyError';
+
+    const ex = tr.b.normalizeException(err);
+    assert.strictEqual(ex.typeName, 'MyError');
+  });
+
+  test('formatDate', function() {
+    assert.strictEqual(tr.b.formatDate(new Date(0)), '1970-01-01 00:00:00');
+  });
+
+  test('runLengthEncoding', function() {
+    assert.deepEqual(tr.b.runLengthEncoding([]), []);
+
+    let encoded = tr.b.runLengthEncoding([1, 1]);
+    assert.deepEqual(encoded.map(x => x.value), [1]);
+    assert.deepEqual(encoded.map(x => x.count), [2]);
+
+    encoded = tr.b.runLengthEncoding([1, 2]);
+    assert.deepEqual(encoded.map(x => x.value), [1, 2]);
+    assert.deepEqual(encoded.map(x => x.count), [1, 1]);
+
+    encoded = tr.b.runLengthEncoding([1, 1, 2, 2, 2, 3, 1, 1]);
+    assert.deepEqual(encoded.map(x => x.value), [1, 2, 3, 1]);
+    assert.deepEqual(encoded.map(x => x.count), [2, 3, 1, 2]);
+  });
+
+  test('isUrl', function() {
+    assert.isFalse(tr.b.isUrl());
+    assert.isFalse(tr.b.isUrl(null));
+    assert.isFalse(tr.b.isUrl(42));
+    assert.isFalse(tr.b.isUrl([]));
+    assert.isFalse(tr.b.isUrl({}));
+    assert.isFalse(tr.b.isUrl(''));
+    assert.isFalse(tr.b.isUrl('data:,'));
+    assert.isFalse(tr.b.isUrl('ftp://user:password@host:port/path'));
+    assert.isTrue(tr.b.isUrl('http://google.com/'));
+    assert.isTrue(tr.b.isUrl('https://www.google.com/'));
+  });
+});
+</script>

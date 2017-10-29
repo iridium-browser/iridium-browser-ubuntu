@@ -1,0 +1,8 @@
+include_rules = [
+  "+mojo",
+  "+net",
+  "+sql",
+  "+third_party/leveldatabase",
+  "+third_party/sqlite",
+  "+third_party/WebKit/public/platform",
+]

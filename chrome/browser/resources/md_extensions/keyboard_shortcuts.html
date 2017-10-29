@@ -1,0 +1,106 @@
+<link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
+<link rel="import" href="chrome://resources/html/cr.html">
+<link rel="import" href="chrome://resources/html/md_select_css.html">
+<link rel="import" href="chrome://resources/html/polymer.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/neon-animation/neon-animatable-behavior.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
+<link rel="import" href="chrome://extensions/animation_helper.html">
+<link rel="import" href="chrome://extensions/shortcut_input.html">
+
+<dom-module id="extensions-keyboard-shortcuts">
+  <template>
+    <style include="md-select cr-hidden-style">
+      .shortcut-card {
+        @apply(--shadow-elevation-2dp);
+        background-color: white;
+        color: var(--paper-grey-600);
+        margin: 0 auto 16px auto;
+        max-width: 928px;
+        min-width: 600px;
+        padding-bottom: 8px;
+        width: 90%;
+      }
+
+      .command-entry {
+        align-items: center;
+        display: flex;
+        height: 48px;
+      }
+
+      .command-name {
+        color: var(--paper-grey-900);
+        flex: 1;
+      }
+
+      .command-entry .md-select-wrapper {
+        -webkit-margin-start: 40px;
+      }
+
+      .card-title {
+        align-items: center;
+        border-bottom: 1px solid var(--paper-grey-400);
+        display: flex;
+        font-size: 14px;
+        font-weight: 500;
+        margin-bottom: 9px;
+        padding: 16px 20px;
+      }
+
+      .icon {
+        -webkit-margin-end: 20px;
+        height: 16px;
+        width: 16px;
+      }
+
+      .card-controls {
+        /* We line up the controls with the name, which is after the
+           20px left padding + 16px icon + 20px margin on the icon. */
+        -webkit-margin-end: 20px;
+        -webkit-margin-start: 56px;
+      }
+
+      #main {
+        margin-top: 24px;
+      }
+    </style>
+    <div id="main">
+      <template is="dom-repeat" items="[[calculateShownItems_(items.*)]]">
+        <div class="shortcut-card">
+          <div class="card-title">
+            <img class="icon" src="[[item.iconUrl]]">
+            <span>[[item.name]]</span>
+          </div>
+          <div class="card-controls">
+            <template is="dom-repeat" items="[[item.commands]]" as="command">
+              <div class="command-entry" command="[[command]]">
+                <span class="command-name">[[command.description]]</span>
+                <extensions-shortcut-input item="[[item.id]]"
+                    shortcut="[[command.keybinding]]"
+                    command-name="[[command.name]]">
+                </extensions-shortcut-input>
+                <div class="md-select-wrapper">
+                  <!-- Binding "value" to triggerScopeChange_ to trigger update
+                      only after CommandScope_ becomes available. -->
+                  <select class="md-select" on-change="onScopeChanged_"
+                      disabled$="[[computeScopeDisabled_(command)]]"
+                      value="[[
+                          triggerScopeChange_(command.scope, CommandScope_)]]">
+                    <option value$="[[CommandScope_.CHROME]]">
+                      $i18n{shortcutScopeInChrome}
+                    </option>
+                    <option value$="[[CommandScope_.GLOBAL]]">
+                      $i18n{shortcutScopeGlobal}
+                    </option>
+                  </select>
+                  <span class="md-select-underline"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+  <script src="chrome://extensions/keyboard_shortcuts.js"></script>
+</dom-module>

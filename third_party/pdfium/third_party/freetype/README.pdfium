@@ -1,0 +1,14 @@
+Name: FreeType
+URL: http://www.freetype.org/
+Version: VER-2-8-73
+Revision: 38bdf22bfe68432aebdd33c198a0bd11b4ebb96f
+Security Critical: yes
+License: FreeType License (FTL)
+License File: FTL.TXT
+
+Description:
+FreeType library.
+
+Local Modifications:
+
+0000-include.patch: Modifications to configuration header files.

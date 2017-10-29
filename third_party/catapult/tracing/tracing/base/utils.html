@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/base/base.html">
+
+<script>
+'use strict';
+
+tr.exportTo('tr.b', function() {
+  const URL_REGEX = /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)$/;  // eslint-disable-line max-len
+
+  /**
+   * Adds a {@code getInstance} static method that always return the same
+   * instance object.
+   * @param {!Function} ctor The constructor for the class to add the static
+   *     method to.
+   */
+  function addSingletonGetter(ctor) {
+    ctor.getInstance = function() {
+      return ctor.instance_ || (ctor.instance_ = new ctor());
+    };
+  }
+
+  function deepCopy(value) {
+    if (!(value instanceof Object)) {
+      if (value === undefined || value === null) return value;
+      if (typeof value === 'string') return value.substring();
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'number') return value;
+      throw new Error('Unrecognized: ' + typeof value);
+    }
+
+    const object = value;
+    if (object instanceof Array) {
+      const res = new Array(object.length);
+      for (let i = 0; i < object.length; i++) {
+        res[i] = deepCopy(object[i]);
+      }
+      return res;
+    }
+
+    if (object.__proto__ !== Object.prototype) {
+      throw new Error('Can only clone simple types');
+    }
+    const res = {};
+    for (const key in object) {
+      res[key] = deepCopy(object[key]);
+    }
+    return res;
+  }
+
+  function normalizeException(e) {
+    if (e === undefined || e === null) {
+      return {
+        typeName: 'UndefinedError',
+        message: 'Unknown: null or undefined exception',
+        stack: 'Unknown'
+      };
+    }
+
+    if (typeof(e) === 'string') {
+      return {
+        typeName: 'StringError',
+        message: e,
+        stack: [e]
+      };
+    }
+
+    let typeName;
+    if (e.name) {
+      typeName = e.name;
+    } else if (e.constructor) {
+      if (e.constructor.name) {
+        typeName = e.constructor.name;
+      } else {
+        typeName = 'AnonymousError';
+      }
+    } else {
+      typeName = 'ErrorWithNoConstructor';
+    }
+
+    const msg = e.message ? e.message : 'Unknown';
+    return {
+      typeName,
+      message: msg,
+      stack: e.stack ? e.stack : [msg]
+    };
+  }
+
+  function stackTraceAsString() {
+    return new Error().stack + '';
+  }
+  function stackTrace() {
+    let stack = stackTraceAsString();
+    stack = stack.split('\n');
+    return stack.slice(2);
+  }
+
+  function getUsingPath(path, fromDict) {
+    const parts = path.split('.');
+    let cur = fromDict;
+
+    for (let part; parts.length && (part = parts.shift());) {
+      if (!parts.length) {
+        return cur[part];
+      } else if (part in cur) {
+        cur = cur[part];
+      } else {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Format date as a string "YYYY-MM-DD HH:mm:ss". The timezone is implicitly
+   * UTC. This format is based on the ISO format, but without milliseconds and
+   * the 'T' is replaced with a space for legibility.
+   *
+   * @param {!Date} date
+   * @return {string}
+   */
+  function formatDate(date) {
+    return date.toISOString().replace('T', ' ').slice(0, 19);
+  }
+
+  /**
+   * Infinity and NaN are left out of JSON for security reasons that do not
+   * apply to our use cases. This helper function allows serializing them
+   * independently of null.
+   *
+   * @param {!number} n
+   * @return {!(number|string)}
+   */
+  function numberToJson(n) {
+    if (isNaN(n)) return 'NaN';
+    if (n === Infinity) return 'Infinity';
+    if (n === -Infinity) return '-Infinity';
+    return n;
+  }
+
+  /**
+   * Infinity and NaN are left out of JSON for security reasons that do not
+   * apply to our use cases. This helper function allows deserializing them
+   * independently of null.
+   *
+   * @param {!(number|string)} n
+   * @return {!number}
+   */
+  function numberFromJson(n) {
+    if (n === 'NaN' || n === null) return NaN;
+    if (n === 'Infinity') return Infinity;
+    if (n === '-Infinity') return -Infinity;
+    return n;
+  }
+
+  /**
+   * @param {Array.<T>} ary
+   * @returns {Array.<Object.<T, number>>} The run length encoding of the array
+   * as an array of {value, count} objects.
+   * @template T
+   */
+  function runLengthEncoding(ary) {
+    const encodedArray = [];
+    for (const element of ary) {
+      if (encodedArray.length === 0 ||
+          encodedArray[encodedArray.length - 1].value !== element) {
+        encodedArray.push({
+          value: element,
+          count: 1,
+        });
+      } else {
+        encodedArray[encodedArray.length - 1].count += 1;
+      }
+    }
+    return encodedArray;
+  }
+
+  /**
+   * @param {string} s
+   * @return {boolean}
+   */
+  function isUrl(s) {
+    return typeof(s) === 'string' && s.match(URL_REGEX) !== null;
+  }
+
+  return {
+    addSingletonGetter,
+    deepCopy,
+    formatDate,
+    getUsingPath,
+    isUrl,
+    normalizeException,
+    numberFromJson,
+    numberToJson,
+    runLengthEncoding,
+    stackTrace,
+    stackTraceAsString,
+  };
+});
+</script>

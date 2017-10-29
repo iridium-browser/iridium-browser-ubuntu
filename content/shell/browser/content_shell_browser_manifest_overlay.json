@@ -1,0 +1,20 @@
+{
+  "name": "content_browser",
+  "interface_provider_specs": {
+    "service_manager:connector": {
+      "provides": {
+        "renderer": [
+          "content::mojom::LayoutTestBluetoothFakeAdapterSetter",
+          "bluetooth::mojom::FakeBluetooth"
+        ]
+      }
+    },
+    "navigation:frame": {
+      "provides": {
+        "renderer": [
+          "content::mojom::MojoLayoutTestHelper"
+        ]
+      }
+    }
+  }
+}
