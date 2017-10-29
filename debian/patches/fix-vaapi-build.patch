@@ -1,0 +1,13 @@
+Index: iridium-ubuntu-build/media/gpu/BUILD.gn
+===================================================================
+--- iridium-ubuntu-build.orig/media/gpu/BUILD.gn
++++ iridium-ubuntu-build/media/gpu/BUILD.gn
+@@ -26,7 +26,7 @@ if (is_desktop_linux && use_vaapi) {
+   }
+ }
+ 
+-if (is_chromeos && current_cpu != "arm") {
++if (current_cpu != "arm" && (is_chromeos || is_desktop_linux)) {
+   action("libva_generate_stubs") {
+     extra_header = "va_stub_header.fragment"
+ 

@@ -44,5 +44,6 @@ arm64-vpx-alignment
 fix-compile-error.patch
 specify-gcc-standard.patch
 fix-wayland-build.patch
+fix-vaapi-build.patch
 iridium-manpage.patch
 iridium-welcomepage.patch
