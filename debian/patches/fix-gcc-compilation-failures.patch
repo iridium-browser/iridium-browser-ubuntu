@@ -1,0 +1,32 @@
+Index: iridium-ubuntu-build/chrome/browser/devtools/devtools_file_system_indexer.cc
+===================================================================
+--- iridium-ubuntu-build.orig/chrome/browser/devtools/devtools_file_system_indexer.cc
++++ iridium-ubuntu-build/chrome/browser/devtools/devtools_file_system_indexer.cc
+@@ -34,12 +34,13 @@ using base::TimeDelta;
+ using base::TimeTicks;
+ using content::BrowserThread;
+ using std::map;
+-using std::set;
+ using std::string;
+ using std::vector;
+ 
+ namespace {
+ 
++using std::set;
++
+ base::SequencedTaskRunner* impl_task_runner() {
+   constexpr base::TaskTraits kBlockingTraits = {base::MayBlock(),
+                                                 base::TaskPriority::BACKGROUND};
+Index: iridium-ubuntu-build/ui/views/examples/box_layout_example.h
+===================================================================
+--- iridium-ubuntu-build.orig/ui/views/examples/box_layout_example.h
++++ iridium-ubuntu-build/ui/views/examples/box_layout_example.h
+@@ -38,7 +38,7 @@ class VIEWS_EXAMPLES_EXPORT BoxLayoutExa
+   void CreateExampleView(View* container) override;
+ 
+  private:
+-  friend class ChildPanel;
++  friend class views::examples::ChildPanel;
+   // ButtonListener
+   void ButtonPressed(Button* sender, const ui::Event& event) override;
+ 
