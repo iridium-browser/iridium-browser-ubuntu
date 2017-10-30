@@ -2,12 +2,35 @@ Index: iridium-ubuntu-build/media/gpu/BUILD.gn
 ===================================================================
 --- iridium-ubuntu-build.orig/media/gpu/BUILD.gn
 +++ iridium-ubuntu-build/media/gpu/BUILD.gn
-@@ -26,7 +26,7 @@ if (is_desktop_linux && use_vaapi) {
-   }
+@@ -18,15 +18,13 @@ if (is_mac) {
+   import("//build/config/mac/mac_sdk.gni")
+ }
+ 
+-if (is_desktop_linux && use_vaapi) {
+-  import("//build/config/linux/pkg_config.gni")
++import("//build/config/linux/pkg_config.gni")
+ 
+-  pkg_config("libva_config") {
+-    packages = [ "libva" ]
+-  }
++pkg_config("libva_config") {
++  packages = [ "libva" ]
  }
  
 -if (is_chromeos && current_cpu != "arm") {
-+if (current_cpu != "arm" && (is_chromeos || is_desktop_linux)) {
++if (use_vaapi || is_desktop_linux) {
    action("libva_generate_stubs") {
      extra_header = "va_stub_header.fragment"
  
+@@ -343,9 +341,8 @@ component("gpu") {
+         ]
+       }
+     }
+-    if (is_desktop_linux) {
+-      public_configs = [ ":libva_config" ]
+-    }
++    
++    public_configs = [ ":libva_config" ]
+   }
+ 
+   if (is_win) {
