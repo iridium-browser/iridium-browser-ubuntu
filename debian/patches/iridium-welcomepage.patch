@@ -1,21 +1,17 @@
-Index: iridium-ubuntu-build/chrome/app/resources/locale_settings.grd
-===================================================================
---- iridium-ubuntu-build.orig/chrome/app/resources/locale_settings.grd
-+++ iridium-ubuntu-build/chrome/app/resources/locale_settings.grd
-@@ -207,7 +207,7 @@
- 
-       <!-- The URL for the the Welcome to Chrome page shown on first run. -->
-       <message name="IDS_WELCOME_PAGE_URL" translateable="false">
--        https://www.google.com/intl/[GRITLANGCODE]/chrome/browser/welcome.html
-+        https://iridiumbrowser.de/welcome/[GRITLANGCODE]/welcome.html
+--- a/chrome/app/resources/locale_settings.grd
++++ b/chrome/app/resources/locale_settings.grd
+@@ -187,7 +187,7 @@
+       <!-- The URL for Google Chrome welcome page. This is used for the pre -->
+       <!-- populated thumbnails. -->
+       <message name="IDS_CHROME_WELCOME_URL" translateable="false">
+-        http://www.google.com/chrome/intl/[GRITLANGCODE]/welcome.html
++	      https://iridiumbrowser.de/faq/?hl=[GRITLANGCODE]&amp;welcome
        </message>
- 
-       <!-- The language dependent download view size. -->
-Index: iridium-ubuntu-build/chrome/browser/first_run/first_run.cc
-===================================================================
---- iridium-ubuntu-build.orig/chrome/browser/first_run/first_run.cc
-+++ iridium-ubuntu-build/chrome/browser/first_run/first_run.cc
-@@ -584,6 +584,7 @@ void SetShouldShowWelcomePage() {
+       <if expr="is_android">
+         <message name="IDS_MOBILE_WELCOME_URL" translateable="false">
+--- a/chrome/browser/first_run/first_run.cc
++++ b/chrome/browser/first_run/first_run.cc
+@@ -458,6 +458,7 @@ void SetShouldShowWelcomePage() {
  }
  
  bool ShouldShowWelcomePage() {
